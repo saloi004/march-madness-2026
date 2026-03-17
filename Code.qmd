@@ -1,54 +1,132 @@
----
-title: "Code"
-format: html
-editor: visual
-execute: 
-  eval : FALSE
----
-
-# Packages
 ```{r}
+# ==========================================
+# March Madness 2026 - Standardized BT Model (完美修复版)
+# ==========================================
+
+# 1. 环境准备与数据加载
 library(dplyr)
 library(readr)
-```
+library(tidyr)
 
+# 路径设置 (请确保路径与你电脑一致)
+base_path <- "/Users/sly/Desktop/MarchMadness/archive/"
 
-# Data
-```{r}
 matchups <- read_csv("/Users/sly/Desktop/MarchMadness/2026_Potential_Matchups.csv")
-team_results <- read_csv("/Users/sly/Desktop/MarchMadness/archive/Team Results.csv")
-conf_results <- read_csv("/Users/sly/Desktop/MarchMadness/archive/Conference Results.csv")
-```
+team_rankings <- read_csv(paste0(base_path, "TeamRankings.csv"))
+evan_miya <- read_csv(paste0(base_path, "EvanMiya.csv"))
+heat_check <- read_csv(paste0(base_path, "Heat Check Ratings.csv"))
+team_results <- read_csv(paste0(base_path, "Team Results.csv")) 
 
-# Simple Model
-```{r}
-final_data <- matchups %>%
-  # A. 用 HigherSeed (较高位种子队名) 匹配 TEAM (数据表队名)
-  left_join(team_results, by = c("HigherSeed" = "TEAM")) %>%
-  rename(High_PAKE = PAKE) %>%
+# ------------------------------------------
+# 1.5 球队名字清洗
+# ------------------------------------------
+matchups <- matchups %>%
+  mutate(
+    HigherSeed = case_when(
+      HigherSeed == "Wright St" ~ "Wright State",
+      HigherSeed == "Utah St" ~ "Utah State",
+      HigherSeed == "Tennessee St" ~ "Tennessee State",
+      HigherSeed == "St Louis" ~ "Saint Louis",
+      HigherSeed == "N Dakota St" ~ "North Dakota State", 
+      HigherSeed == "Kennesaw" ~ "Kennesaw State",
+      HigherSeed == "Queens NC" ~ "Queens",
+      TRUE ~ HigherSeed
+    ),
+    LowerSeed = case_when(
+      LowerSeed == "Wright St" ~ "Wright State",
+      LowerSeed == "Utah St" ~ "Utah State",
+      LowerSeed == "Tennessee St" ~ "Tennessee State",
+      LowerSeed == "St Louis" ~ "Saint Louis",
+      LowerSeed == "N Dakota St" ~ "North Dakota State", 
+      LowerSeed == "Kennesaw" ~ "Kennesaw State",
+      LowerSeed == "Queens NC" ~ "Queens",
+      TRUE ~ LowerSeed
+    )
+  )
+
+# ==========================================
+# 2. 特征工程：多维度能力量化
+# ==========================================
+
+# A, B, C, D 提取逻辑保持不变
+historical_beta <- team_rankings %>%
+  filter(YEAR >= 2024) %>%
+  mutate(TR_RATING = as.numeric(`TR RATING`)) %>%
+  group_by(TEAM) %>%
+  summarize(Beta_Score = mean(TR_RATING, na.rm = TRUE))
+
+current_bpr <- evan_miya %>%
+  filter(YEAR == max(YEAR)) %>% 
+  select(TEAM, `RELATIVE RATING`) %>%
+  rename(BPR = `RELATIVE RATING`) %>%
+  distinct(TEAM, .keep_all = TRUE)
+
+momentum_score <- heat_check %>%
+  filter(YEAR == max(YEAR)) %>% 
+  mutate(
+    Recent_Form = as.numeric(`DARK HORSE`) + as.numeric(`UPSET ALERT`) + as.numeric(`CINDERELLA`)
+  ) %>%
+  select(TEAM, Recent_Form) %>%
+  distinct(TEAM, .keep_all = TRUE)
+
+tourney_pedigree <- team_results %>%
+  select(TEAM, PAKE) %>%
+  group_by(TEAM) %>%
+  summarize(Team_PAKE = mean(PAKE, na.rm = TRUE))
+
+# E. 【关键修复】创建锦标赛全集球队名单，从这开始左连接，保证绝不漏队！
+all_tourney_teams <- data.frame(TEAM = unique(c(matchups$HigherSeed, matchups$LowerSeed)))
+
+team_master_stats <- all_tourney_teams %>%
+  left_join(historical_beta, by = "TEAM") %>%
+  left_join(current_bpr, by = "TEAM") %>%
+  left_join(momentum_score, by = "TEAM") %>%
+  left_join(tourney_pedigree, by = "TEAM") %>%
+  mutate(
+    # 如果小球队没有数据，给他们赋全联盟平均值（或者0）
+    Beta_Score = ifelse(is.na(Beta_Score), mean(Beta_Score, na.rm = TRUE), Beta_Score),
+    BPR = ifelse(is.na(BPR), mean(BPR, na.rm = TRUE), BPR),
+    Recent_Form = ifelse(is.na(Recent_Form), 0, Recent_Form),
+    Team_PAKE = ifelse(is.na(Team_PAKE), 0, Team_PAKE)
+  ) %>%
+  mutate(
+    # 标准化：用平均值填充后的 NA，标准化后 Z-Score 会精准等于 0（代表普通平均水平）
+    Z_BPR = scale(BPR)[, 1],
+    Z_Beta = scale(Beta_Score)[, 1],
+    Z_Form = scale(Recent_Form)[, 1],
+    Z_PAKE = scale(Team_PAKE)[, 1],
+    
+    # 构建 BT 模型潜变量
+    Lambda = (0.45 * Z_BPR) + (0.35 * Z_Beta) + (0.10 * Z_Form) + (0.10 * Z_PAKE)
+  )
+
+# ==========================================
+# 3. 核心模型：Bradley-Terry 对决推演
+# ==========================================
+
+final_predictions <- matchups %>%
+  left_join(team_master_stats, by = c("HigherSeed" = "TEAM")) %>%
+  rename(High_Lambda = Lambda) %>%
   
-  # B. 用 LowerSeed (较低位种子队名) 匹配 TEAM
-  left_join(team_results, by = c("LowerSeed" = "TEAM")) %>%
-  rename(Low_PAKE = PAKE) %>%
+  left_join(team_master_stats, by = c("LowerSeed" = "TEAM")) %>%
+  rename(Low_Lambda = Lambda) %>%
   
   mutate(
-    Seed_Diff = HigherSeedNum - LowerSeedNum, 
-    PAKE_Diff = High_PAKE - Low_PAKE,         
-    
-    # 计算实力差并转换为概率
-    # 主观赋权
-    Power_Score = (0.15 * PAKE_Diff) - (0.10 * Seed_Diff),
-    Predictions = 1 / (1 + exp(-Power_Score))
-  )
-```
-
-
-```{r}
-submission <- final_data %>%
-  select(HigherSeed, HigherSeedID, HigherSeedNum, LowerSeed, LowerSeedID, LowerSeedNum, Predictions) %>%
-  # 如果极个别球队名字拼写有微小差异导致没匹配上，依然给 0.5 防报错
+    Delta_Lambda = High_Lambda - Low_Lambda,
+    c = 1.7, # 锦标赛温度常数
+    Predictions = 1 / (1 + exp(-(Delta_Lambda / c)))
+  ) %>%
   mutate(Predictions = ifelse(is.na(Predictions), 0.5, Predictions))
 
-write_csv(submission, "2026_Final_Submission.csv")
+# ==========================================
+# 4. 生成提交文件
+# ==========================================
+
+submission <- final_predictions %>%
+  select(HigherSeed, HigherSeedID, HigherSeedNum, 
+         LowerSeed, LowerSeedID, LowerSeedNum, Predictions)
+
+write_csv(submission, "2026_Standard_BT_Fixed.csv")
+print("完美修复！所有球队已匹配，生成的 2026_Standard_BT_Fixed.csv 已保存。")
 ```
 
