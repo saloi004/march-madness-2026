@@ -1,14 +1,18 @@
-```{r}
-# ==========================================
-# March Madness 2026 - Standardized BT Model (完美修复版)
-# ==========================================
+---
+title: "March Madness 2026 - Standardized BT Model"
+format: html
+editor: visual
+execute: 
+  eval: false
+---
+
 
 # 1. 环境准备与数据加载
+```{r}
 library(dplyr)
 library(readr)
 library(tidyr)
 
-# 路径设置 (请确保路径与你电脑一致)
 base_path <- "/Users/sly/Desktop/MarchMadness/archive/"
 
 matchups <- read_csv("/Users/sly/Desktop/MarchMadness/2026_Potential_Matchups.csv")
@@ -43,11 +47,10 @@ matchups <- matchups %>%
       TRUE ~ LowerSeed
     )
   )
+```
 
-# ==========================================
 # 2. 特征工程：多维度能力量化
-# ==========================================
-
+```{r}
 # A, B, C, D 提取逻辑保持不变
 historical_beta <- team_rankings %>%
   filter(YEAR >= 2024) %>%
@@ -99,11 +102,10 @@ team_master_stats <- all_tourney_teams %>%
     # 构建 BT 模型潜变量
     Lambda = (0.45 * Z_BPR) + (0.35 * Z_Beta) + (0.10 * Z_Form) + (0.10 * Z_PAKE)
   )
+```
 
-# ==========================================
 # 3. 核心模型：Bradley-Terry 对决推演
-# ==========================================
-
+```{r}
 final_predictions <- matchups %>%
   left_join(team_master_stats, by = c("HigherSeed" = "TEAM")) %>%
   rename(High_Lambda = Lambda) %>%
@@ -117,16 +119,14 @@ final_predictions <- matchups %>%
     Predictions = 1 / (1 + exp(-(Delta_Lambda / c)))
   ) %>%
   mutate(Predictions = ifelse(is.na(Predictions), 0.5, Predictions))
+```
 
-# ==========================================
 # 4. 生成提交文件
-# ==========================================
-
+```{r}
 submission <- final_predictions %>%
   select(HigherSeed, HigherSeedID, HigherSeedNum, 
          LowerSeed, LowerSeedID, LowerSeedNum, Predictions)
 
 write_csv(submission, "2026_Standard_BT_Fixed.csv")
-print("完美修复！所有球队已匹配，生成的 2026_Standard_BT_Fixed.csv 已保存。")
 ```
 
