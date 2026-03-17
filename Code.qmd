@@ -1,0 +1,54 @@
+---
+title: "Code"
+format: html
+editor: visual
+execute: 
+  eval : FALSE
+---
+
+```{r}
+library(dplyr)
+library(readr)
+```
+
+
+```{r}
+# 1. 使用你已经写好的代码读取数据
+matchups <- read_csv("/Users/sly/Desktop/MarchMadness/2026_Potential_Matchups.csv")
+team_results <- read_csv("/Users/sly/Desktop/MarchMadness/archive/Team Results.csv")
+conf_results <- read_csv("/Users/sly/Desktop/MarchMadness/archive/Conference Results.csv")
+```
+
+```{r}
+final_data <- matchups %>%
+  # A. 用 HigherSeed (较高位种子队名) 匹配 TEAM (数据表队名)
+  left_join(team_results, by = c("HigherSeed" = "TEAM")) %>%
+  rename(High_PAKE = PAKE) %>%
+  
+  # B. 用 LowerSeed (较低位种子队名) 匹配 TEAM
+  left_join(team_results, by = c("LowerSeed" = "TEAM")) %>%
+  rename(Low_PAKE = PAKE) %>%
+  
+  mutate(
+    Seed_Diff = HigherSeedNum - LowerSeedNum, 
+    PAKE_Diff = High_PAKE - Low_PAKE,         
+    
+    # 计算实力差并转换为概率
+    Power_Score = (0.15 * PAKE_Diff) - (0.10 * Seed_Diff),
+    Predictions = 1 / (1 + exp(-Power_Score))
+  )
+```
+
+
+```{r}
+# ==========================================
+# 整理导出
+# ==========================================
+submission <- final_data %>%
+  select(HigherSeed, HigherSeedID, HigherSeedNum, LowerSeed, LowerSeedID, LowerSeedNum, Predictions) %>%
+  # 如果极个别球队名字拼写有微小差异导致没匹配上，依然给 0.5 防报错
+  mutate(Predictions = ifelse(is.na(Predictions), 0.5, Predictions))
+
+write_csv(submission, "2026_Final_Submission.csv")
+```
+
