@@ -12,11 +12,11 @@ This repository contains the code and methodology for predicting the 2026 NCAA M
 
 Our model integrates official Kaggle competition data with several high-quality external analytics sources to capture both raw statistical efficiency and intangible tournament factors:
 
-1. **Kaggle Official Data:** * `MRegularSeasonDetailedResults.csv`: Used to calculate base efficiency metrics, specifically the season-long Average Net Rating ($Z_{Efficiency}$).
-2. **EvanMiya Analytics:** * Provided Bayesian Performance Rating (BPR) to measure absolute current-season strength ($Z_{BPR}$) and True Tempo to evaluate game pace.
-3. **TeamRankings:** * Historical `TR RATING` data (2024-2026) to establish baseline program pedigree and floor ($Z_{Beta}$).
-4. **Heat Check CBB:** * "Dark Horse," "Upset Alert," and "Cinderella" ratings to quantify late-season momentum ($Z_{Form}$).
-5. **Historical Team Results:** * Performance Against Expectations (PAKE) to capture historical tournament over-performance ($Z_{PAKE}$).
+1. **Kaggle Official Data:** `MRegularSeasonDetailedResults.csv`: Used to calculate base efficiency metrics, specifically the season-long Average Net Rating ($Z_{Efficiency}$).
+2. **EvanMiya Analytics:** Provided Bayesian Performance Rating (BPR) to measure absolute current-season strength ($Z_{BPR}$) and True Tempo to evaluate game pace.
+3. **TeamRankings:** Historical `TR RATING` data (2024-2026) to establish baseline program pedigree and floor ($Z_{Beta}$).
+4. **Heat Check CBB:** "Dark Horse," "Upset Alert," and "Cinderella" ratings to quantify late-season momentum ($Z_{Form}$).
+5. **Historical Team Results:** Performance Against Expectations (PAKE) to capture historical tournament over-performance ($Z_{PAKE}$).
 
 ## Methodology
 The core of the prediction engine is a Latent Strength variable ($\Lambda$) calculated for each team, which blends the standardized (Z-score) metrics listed above:
