@@ -21,9 +21,6 @@ evan_miya <- read_csv(paste0(base_path, "EvanMiya.csv"))
 heat_check <- read_csv(paste0(base_path, "Heat Check Ratings.csv"))
 team_results <- read_csv(paste0(base_path, "Team Results.csv")) 
 
-# ------------------------------------------
-# 1.5 球队名字清洗
-# ------------------------------------------
 matchups <- matchups %>%
   mutate(
     HigherSeed = case_when(
@@ -49,9 +46,8 @@ matchups <- matchups %>%
   )
 ```
 
-# 2. 特征工程：多维度能力量化
+# 2. 多维特征
 ```{r}
-# A, B, C, D 提取逻辑保持不变
 historical_beta <- team_rankings %>%
   filter(YEAR >= 2024) %>%
   mutate(TR_RATING = as.numeric(`TR RATING`)) %>%
@@ -66,9 +62,7 @@ current_bpr <- evan_miya %>%
 
 momentum_score <- heat_check %>%
   filter(YEAR == max(YEAR)) %>% 
-  mutate(
-    Recent_Form = as.numeric(`DARK HORSE`) + as.numeric(`UPSET ALERT`) + as.numeric(`CINDERELLA`)
-  ) %>%
+  mutate(Recent_Form = as.numeric(`DARK HORSE`) + as.numeric(`UPSET ALERT`) + as.numeric(`CINDERELLA`)) %>%
   select(TEAM, Recent_Form) %>%
   distinct(TEAM, .keep_all = TRUE)
 
@@ -77,7 +71,12 @@ tourney_pedigree <- team_results %>%
   group_by(TEAM) %>%
   summarize(Team_PAKE = mean(PAKE, na.rm = TRUE))
 
-# E. 【关键修复】创建锦标赛全集球队名单，从这开始左连接，保证绝不漏队！
+team_tempo <- evan_miya %>%
+  filter(YEAR == max(YEAR)) %>%
+  select(TEAM, `TRUE TEMPO`) %>%
+  rename(Tempo = `TRUE TEMPO`) %>%
+  distinct(TEAM, .keep_all = TRUE)
+
 all_tourney_teams <- data.frame(TEAM = unique(c(matchups$HigherSeed, matchups$LowerSeed)))
 
 team_master_stats <- all_tourney_teams %>%
@@ -85,43 +84,51 @@ team_master_stats <- all_tourney_teams %>%
   left_join(current_bpr, by = "TEAM") %>%
   left_join(momentum_score, by = "TEAM") %>%
   left_join(tourney_pedigree, by = "TEAM") %>%
+  left_join(team_tempo, by = "TEAM") %>%
   mutate(
-    # 如果小球队没有数据，给他们赋全联盟平均值（或者0）
     Beta_Score = ifelse(is.na(Beta_Score), mean(Beta_Score, na.rm = TRUE), Beta_Score),
     BPR = ifelse(is.na(BPR), mean(BPR, na.rm = TRUE), BPR),
     Recent_Form = ifelse(is.na(Recent_Form), 0, Recent_Form),
-    Team_PAKE = ifelse(is.na(Team_PAKE), 0, Team_PAKE)
+    Team_PAKE = ifelse(is.na(Team_PAKE), 0, Team_PAKE),
+    Tempo = ifelse(is.na(Tempo), mean(Tempo, na.rm = TRUE), Tempo)
   ) %>%
   mutate(
-    # 标准化：用平均值填充后的 NA，标准化后 Z-Score 会精准等于 0（代表普通平均水平）
+    # Z-Score 标准化
     Z_BPR = scale(BPR)[, 1],
     Z_Beta = scale(Beta_Score)[, 1],
     Z_Form = scale(Recent_Form)[, 1],
     Z_PAKE = scale(Team_PAKE)[, 1],
+    Z_Tempo = scale(Tempo)[, 1], 
     
-    # 构建 BT 模型潜变量
+    # 核心实力潜变量 Lambda (不包含节奏，节奏将作为环境干扰项)
     Lambda = (0.45 * Z_BPR) + (0.35 * Z_Beta) + (0.10 * Z_Form) + (0.10 * Z_PAKE)
   )
 ```
 
-# 3. 核心模型：Bradley-Terry 对决推演
+# 3. 动态温度 BT 模型
 ```{r}
 final_predictions <- matchups %>%
   left_join(team_master_stats, by = c("HigherSeed" = "TEAM")) %>%
-  rename(High_Lambda = Lambda) %>%
+  rename(High_Lambda = Lambda, High_Tempo = Z_Tempo) %>%
   
   left_join(team_master_stats, by = c("LowerSeed" = "TEAM")) %>%
-  rename(Low_Lambda = Lambda) %>%
+  rename(Low_Lambda = Lambda, Low_Tempo = Z_Tempo) %>%
   
   mutate(
     Delta_Lambda = High_Lambda - Low_Lambda,
-    c = 1.7, # 锦标赛温度常数
-    Predictions = 1 / (1 + exp(-(Delta_Lambda / c)))
+    Dynamic_c = case_when(
+      HigherSeedNum <= 4 & LowerSeedNum >= 12 & Low_Tempo > 0.5 ~ 1.7 + (Low_Tempo * 0.2),
+      TRUE ~ 1.7
+    ),
+
+    Dynamic_c = pmin(Dynamic_c, 2.2),
+    
+    Predictions = 1 / (1 + exp(-(Delta_Lambda / Dynamic_c)))
   ) %>%
   mutate(Predictions = ifelse(is.na(Predictions), 0.5, Predictions))
 ```
 
-# 4. 生成提交文件
+# 4. 文件保存
 ```{r}
 submission <- final_predictions %>%
   select(HigherSeed, HigherSeedID, HigherSeedNum, 
