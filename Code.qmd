@@ -100,7 +100,7 @@ team_master_stats <- all_tourney_teams %>%
     Z_PAKE = scale(Team_PAKE)[, 1],
     Z_Tempo = scale(Tempo)[, 1], 
     
-    # 核心实力潜变量 Lambda (不包含节奏，节奏将作为环境干扰项)
+    # 核心实力潜变量 Lambda
     Lambda = (0.45 * Z_BPR) + (0.35 * Z_Beta) + (0.10 * Z_Form) + (0.10 * Z_PAKE)
   )
 ```
@@ -136,4 +136,5 @@ submission <- final_predictions %>%
 
 write_csv(submission, "2026_Standard_BT_Fixed.csv")
 ```
+
 
